@@ -32,10 +32,10 @@ struct Feature {
 };
 
 struct Template {
-    int width;
-    int height;
-    int tl_x;
-    int tl_y;
+    int width = 0;
+    int height = 0;
+    int tl_x = 0;
+    int tl_y = 0;
     int pyramid_level;
     std::vector<Feature> features;
     Template(std::vector<Feature> _features)
