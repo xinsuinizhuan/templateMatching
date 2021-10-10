@@ -31,6 +31,9 @@ static inline int getLabel(int quantized) {
 bool ColorGradientPyramid::selectScatteredFeatures(const std::vector<Candidate>& candidates,
                                                    std::vector<Feature>& features, size_t num_features,
                                                    float distance) {
+	if (distance == 0) {
+		return false;
+	}
     features.clear();
     float distance_sq = distance * distance;
     size_t i = 0;
@@ -65,7 +68,7 @@ bool ColorGradientPyramid::selectScatteredFeatures(const std::vector<Candidate>&
             i = 0;
             distance -= 1.0f;
             distance_sq = distance * distance;
-            if (num_ok || distance < 3) {
+            if (num_ok || distance < 2) {
                 break;
             }
         }
@@ -254,6 +257,9 @@ bool ColorGradientPyramid::extractTemplate(Template& templ, cv::Mat draw) const 
     }
 
     std::vector<Candidate> candidates;
+	std::vector<std::vector<Candidate>> vCandidate(8);
+	std::vector<std::vector<Feature>> vFeature(8);
+
     bool no_mask = local_mask.empty();
     float threshold_sq = strong_threshold * strong_threshold;
 
@@ -305,13 +311,35 @@ bool ColorGradientPyramid::extractTemplate(Template& templ, cv::Mat draw) const 
                 }
 
                 if (score > threshold_sq && angle.at<uchar>(r, c) > 0) {
-                    candidates.push_back(Candidate(c, r, getLabel(angle.at<uchar>(r, c)), score));
-                    candidates.back().f.theta = angle_ori.at<float>(r, c);
+					int nowLabel = getLabel(angle.at<uchar>(r, c));
+					if (nowLabel != 0) {
+						vCandidate[nowLabel - 1].emplace_back(Candidate(c, r, nowLabel, score));
+						vCandidate[nowLabel - 1].back().f.theta = angle_ori.at<float>(r, c);
+					}
+                    //candidates.push_back(Candidate(c, r, getLabel(angle.at<uchar>(r, c)), score));
+                   // candidates.back().f.theta = angle_ori.at<float>(r, c);
                 }
             }
         }
     }
-    if (candidates.size() < num_features) {
+	for (int cnt = 0; cnt < 8; cnt++) {
+		if (vCandidate[cnt].size() <= 2) {
+			std::cout << "too few features, abort" << std::endl;
+		}
+		std::stable_sort(vCandidate[cnt].begin(), vCandidate[cnt].end());
+
+		float distance = static_cast<float>(vCandidate[cnt].size() / (num_features/8));
+
+		if (!selectScatteredFeatures(vCandidate[cnt], vFeature[cnt], num_features/8, distance)) {
+			//return false;
+		}
+		for (auto k : vFeature[cnt]) {
+			templ.features.emplace_back(k);
+		}
+		
+	}
+
+    /*if (candidates.size() < num_features) {
         if (candidates.size() <= 4) {
             std::cout << "too few features, abort" << std::endl;
             return false;
@@ -326,7 +354,7 @@ bool ColorGradientPyramid::extractTemplate(Template& templ, cv::Mat draw) const 
     if (!selectScatteredFeatures(candidates, templ.features, num_features, distance)) {
         return false;
     }
-
+*/
     for (auto k : templ.features) {
         cv::circle(t, cv::Point(k.x, k.y), 2, cv::Scalar(0, 255, 255), -1, 8, 0);
     }
@@ -396,7 +424,7 @@ bool Detector::addTemplate(const cv::Mat& source, const cv::Mat& object_mask) {
             if (i == 0) {
                 sumVal.push_back(sum(qp->src)[0]);
             }
-
+			tp[i].features.clear();
             bool success = qp->extractTemplate(tp[i], qp->src);
             if (!success) return false;
         }
@@ -407,243 +435,244 @@ bool Detector::addTemplate(const cv::Mat& source, const cv::Mat& object_mask) {
     return true;
 }
 
-bool Detector::matchTemplate(const cv::Mat& source, int nameNumb) {
-    clock_t startTime, endTime;
+bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
+{
+	clock_t startTime, endTime;
+	startTime = clock();
+	float offset_x = 0;
+	float offset_y = 0;
+	float localAngle = 0;
+	float similarity = 0;
+	for (int loopVTPNum = class_templates.size() - 1; loopVTPNum >= 0; loopVTPNum--) {
+		similarity = 0;
+		cv::Mat matchSrc;
+		source.copyTo(matchSrc);
 
-    startTime = clock();
-    float offset_x = 0;
-    float offset_y = 0;
-    float localAngle = 0;
-    float similarity = 0;
+		int n = class_templates[loopVTPNum].size();
+		if (loopVTPNum != class_templates.size() - 1) {
+			localAngle = localAngle >= 5 ? localAngle - 5 : n - (5 - localAngle);
+			n = localAngle + 10;
+			/*if (n >= class_templates[loopVTPNum].size()) {
+				n = n - class_templates[loopVTPNum].size();
+			}*/
+		}
+		//对待测图像进行金字塔降采样
+		cv::Size window = srcSize;
+		for (int j = 0; j < T_at_level[loopVTPNum]; j += 2) {
+			cv::pyrDown(matchSrc, matchSrc);
+			window.width /= 2;
+			window.height /= 2;
+		}
+		int pairNum = 0;
+		//计算全图的梯度方向
+		cv::Mat gradientVal, gradientAngle, gradientAngle_roi;
+		quantizedOrientations(matchSrc, gradientVal, gradientAngle, gradientAngle_roi, 70);
 
-    //设置阈值
-    int gradientThreshold = 50000;
+		if (loopVTPNum == class_templates.size() - 1) {
 
-    for (int loopVTPNum = class_templates.size() - 1; loopVTPNum >= 0; loopVTPNum--) {
-        similarity = 0;
-        cv::Mat matchSrc;
-        source.copyTo(matchSrc);
+			//只在底层进行操作
+			//对待测图像的全图方向进行分类
+			std::vector<std::vector<cv::Point2f>> matchSrcAnglePoint(8);
+			for (int i = 0; i < gradientAngle.cols - 1; i++) {
+				for (int j = 0; j < gradientAngle.rows - 1; j++) {
+					int labelVal = getLabel(gradientAngle.at<uchar>(j, i));
+					//std::cout << i << "," << j << std::endl;
+					if (labelVal > 0 && gradientVal.at<float>(j, i) > 50000) {
+						matchSrcAnglePoint[labelVal - 1].emplace_back(cv::Point2f(i, j));
+					}
+				}
+			}
+			//按照坐标进行排序
+			for (int k = 0; k < matchSrcAnglePoint.size(); k++) {
+				sort(matchSrcAnglePoint[k].begin(), matchSrcAnglePoint[k].end(), [](cv::Point2f& a, cv::Point2f& b) {
+					if (a.x < b.x) {
+						return true;
+					}
+					else if (a.x == b.x) {
+						return a.y < b.y;
+					}
+					return false;
+				});
+			}
+			float x_t=0, y_t=0, angle_t=0;
 
-        int n = class_templates[loopVTPNum].size();
-        if (loopVTPNum != class_templates.size() - 1) {
-            localAngle = localAngle >= 5 ? localAngle - 5 : n - (5 - localAngle);
-            n = localAngle + 10;
-            /*if (n >= class_templates[loopVTPNum].size()) {
-                                n = n - class_templates[loopVTPNum].size();
-                        }*/
-        }
-        //对待测图像进行金字塔降采样
-        cv::Size window = srcSize;
-        for (int j = 0; j < T_at_level[loopVTPNum]; j += 2) {
-            cv::pyrDown(matchSrc, matchSrc);
-            window.width /= 2;
-            window.height /= 2;
-        }
-        int pairNum = 0;
-        //计算全图的梯度方向
-        cv::Mat gradientVal, gradientAngle, gradientAngle_roi;
-        quantizedOrientations(matchSrc, gradientVal, gradientAngle, gradientAngle_roi, 70);
+			//角度匹配
 
-        if (loopVTPNum == class_templates.size() - 1) {
-            //只在底层进行操作
-            //对待测图像的全图方向进行分类
-            std::vector<std::vector<cv::Point2f>> matchSrcAnglePoint(8);
-            for (int i = 0; i < gradientAngle.cols - 1; i++) {
-                for (int j = 0; j < gradientAngle.rows - 1; j++) {
-                    int labelVal = getLabel(gradientAngle.at<uchar>(j, i));
-                    // std::cout << i << "," << j << std::endl;
-                    if (labelVal > 0 && gradientVal.at<float>(j, i) > 50000) {
-                        matchSrcAnglePoint[labelVal - 1].emplace_back(cv::Point2f(i, j));
-                    }
-                }
-            }
-            //按照坐标进行排序
-            for (int k = 0; k < matchSrcAnglePoint.size(); k++) {
-                sort(matchSrcAnglePoint[k].begin(), matchSrcAnglePoint[k].end(), [](cv::Point2f& a, cv::Point2f& b) {
-                    if (a.x < b.x) {
-                        return true;
-                    } else if (a.x == b.x) {
-                        return a.y < b.y;
-                    }
-                    return false;
-                });
-            }
-            float x_t = 0, y_t = 0, angle_t = 0;
+			for (int loopRotateNum = 0; loopRotateNum < n; loopRotateNum++) {
+				//对当前角度的特征点进行方向分类
+				std::vector<std::vector<cv::Point2f>> templAnglePoint(8);
+				std::vector<int> maxSize(8);
+				for (auto k : class_templates[loopVTPNum][loopRotateNum].features) {
+					if (k.label > 0) {
+						templAnglePoint[k.label - 1].emplace_back(cv::Point2f(k.x, k.y));
+					}
+					maxSize[k.label - 1]++;
+				}
+				//找到元素最多的一个方向
+				int maxPosition1 = max_element(maxSize.begin(), maxSize.end()) - maxSize.begin();
+				//同样排序
+				for (int k = 0; k < templAnglePoint.size(); k++) {
+					sort(templAnglePoint[k].begin(), templAnglePoint[k].end(), [](cv::Point2f& a, cv::Point2f& b) {
+						if (a.x < b.x) {
+							return true;
+						}
+						else if (a.x == b.x) {
+							return a.y < b.y;
+						}
+						return false;
+					});
+				}
 
-            //角度匹配
-            for (int loopRotateNum = 0; loopRotateNum < n; loopRotateNum++) {
-                //对当前角度的特征点进行方向分类
-                std::vector<std::vector<cv::Point2f>> templAnglePoint(8);
-                std::vector<int> maxSize(8);
-                for (auto k : class_templates[loopVTPNum][loopRotateNum].features) {
-                    if (k.label > 0) {
-                        templAnglePoint[k.label - 1].emplace_back(cv::Point2f(k.x, k.y));
-                    }
-                    maxSize[k.label - 1]++;
-                }
-                //找到元素最多的一个方向
-                int maxPosition = max_element(maxSize.begin(), maxSize.end()) - maxSize.begin();
-                //同样排序
-                for (int k = 0; k < templAnglePoint.size(); k++) {
-                    sort(templAnglePoint[k].begin(), templAnglePoint[k].end(), [](cv::Point2f& a, cv::Point2f& b) {
-                        if (a.x < b.x) {
-                            return true;
-                        } else if (a.x == b.x) {
-                            return a.y < b.y;
-                        }
-                        return false;
-                    });
-                }
+				//设置阈值
+				int gradientThreshold;
+				for (int maxPosition = 0; maxPosition < 8; maxPosition++) {
+					if (templAnglePoint[maxPosition].size() == 0) {
+						continue;
+					}
+					float offsetX;
+					float offsetY;
+					//设置边界值
+					int index = 500;
+					//设置kernel
+					int kernel = 5;
+					//设置匹配的点数
+					int matchPairNum = 0;
+					bool flag = false;
+					//先找到第一个匹配点
+					for (int loopMatchSrcPoint = 0; loopMatchSrcPoint < matchSrcAnglePoint[maxPosition].size() && (!flag); loopMatchSrcPoint++) {
+						offsetX = matchSrcAnglePoint[maxPosition][loopMatchSrcPoint].x - templAnglePoint[maxPosition][0].x;
+						offsetY = matchSrcAnglePoint[maxPosition][loopMatchSrcPoint].y - templAnglePoint[maxPosition][0].y;
+						flag = true;
 
-                float offsetX;
-                float offsetY;
-                //设置边界值
-                int index = 20;
-                //设置kernel
-                int kernel = 2;
-                //设置匹配的点数
-                int matchPairNum = 0;
-                bool flag = false;
-                //先找到第一个匹配点
+						//判断该offset是否在前4个内有效
+						for (int count = 1; count < templAnglePoint[maxPosition].size() - 1 && count < index; count++) {
+							flag = isExitPoint(cv::Point2f(templAnglePoint[maxPosition][count].x + offsetX,
+								templAnglePoint[maxPosition][count].y + offsetY),
+								matchSrcAnglePoint[maxPosition], kernel);
+							if (!flag) {
+								break;
+							}
+						}
+					}
 
-                for (int loopMatchSrcPoint = 0; loopMatchSrcPoint < matchSrcAnglePoint[maxPosition].size() && (!flag);
-                     loopMatchSrcPoint++) {
-                    offsetX = matchSrcAnglePoint[maxPosition][loopMatchSrcPoint].x - templAnglePoint[maxPosition][0].x;
-                    offsetY = matchSrcAnglePoint[maxPosition][loopMatchSrcPoint].y - templAnglePoint[maxPosition][0].y;
-                    flag = true;
+					//利用offset进行匹配
+					for (int loopRoi = 0; loopRoi < templAnglePoint.size() && flag; loopRoi++) {
+						for (auto k : templAnglePoint[loopRoi]) {
+							if (isExitPoint(cv::Point2f(k.x + offsetX, k.y + offsetY), matchSrcAnglePoint[loopRoi], kernel)) {
+								matchPairNum++;
+							}
+						}
+					}
+					if (similarity < (float)matchPairNum / (float)class_templates[loopVTPNum][loopRotateNum].features.size()) {
+						similarity = (float)matchPairNum / (float)class_templates[loopVTPNum][loopRotateNum].features.size();
+						x_t = offsetX;
+						y_t = offsetY;
+						angle_t = loopRotateNum;
+					}
+				}
+				//std::cout << loopRotateNum << std::endl;
+			}
+			offset_x = x_t;
+			offset_y = y_t;
+			localAngle = angle_t;
+			for (auto k : class_templates[loopVTPNum][localAngle].features) {
+				cv::circle(matchSrc, cv::Point(k.x + offset_x, k.y + offset_y), 3, cv::Scalar(255, 255, 255), -1, 8, 0);
+			}
+		}
+		else {
+			int i_temp = 0;
+			int j_temp = 0;
+			int tAngle = 0;
+			offset_x = (offset_x * 2 - 10) > 0 ? (offset_x * 2 - 10) : (offset_x * 2);
+			offset_y = (offset_y * 2 - 10) > 0 ? (offset_y * 2 - 10) : (offset_y * 2);
+			//统计该模板下的方向总和
+			for (int i = offset_x; i < matchSrc.cols - window.width && i < offset_x + 20; i++) {
+				for (int j = offset_y; j < matchSrc.rows - window.height && j < offset_y + 20; j++) {
+					int pairNumPre = 0;
+					// st
 
-                    //判断该offset是否在前index个内有效
-                    for (int count = 1; count < templAnglePoint[maxPosition].size() - 1 && count < index; count++) {
-                        flag = isExitPoint(cv::Point2f(templAnglePoint[maxPosition][count].x + offsetX,
-                                                       templAnglePoint[maxPosition][count].y + offsetY),
-                                           matchSrcAnglePoint[maxPosition], kernel);
-                        if (!flag) {
-                            break;
-                        }
-                    }
-                }
+					cv::Mat matchSrcMagnitudeROI = gradientVal(cv::Rect(i, j, window.width, window.height));
+					cv::Mat matchSrcROI = matchSrc(cv::Rect(i, j, window.width, window.height));
+					// ed
 
-                //利用offset进行匹配
-                for (int loopRoi = 0; loopRoi < templAnglePoint.size() && flag; loopRoi++) {
-                    for (auto k : templAnglePoint[loopRoi]) {
-                        if (isExitPoint(cv::Point2f(k.x + offsetX, k.y + offsetY), matchSrcAnglePoint[loopRoi],
-                                        kernel)) {
-                            matchPairNum++;
-                        }
-                    }
-                }
-                if (similarity <
-                    (float)matchPairNum / (float)class_templates[loopVTPNum][loopRotateNum].features.size()) {
-                    similarity =
-                        (float)matchPairNum / (float)class_templates[loopVTPNum][loopRotateNum].features.size();
-                    x_t = offsetX;
-                    y_t = offsetY;
-                    angle_t = loopRotateNum;
-                }
-            }
-            offset_x = x_t;
-            offset_y = y_t;
-            localAngle = angle_t;
-            for (auto k : class_templates[loopVTPNum][localAngle].features) {
-                cv::circle(matchSrc, cv::Point(k.x + offset_x, k.y + offset_y), 3, cv::Scalar(255, 255, 255), -1, 8, 0);
-            }
-        } else {
-            int i_temp = 0;
-            int j_temp = 0;
-            int tAngle = 0;
-            offset_x = (offset_x * 2 - 10) > 0 ? (offset_x * 2 - 10) : (offset_x * 2);
-            offset_y = (offset_y * 2 - 10) > 0 ? (offset_y * 2 - 10) : (offset_y * 2);
-            //统计该模板下的方向总和
-            for (int i = offset_x; i < matchSrc.cols - window.width && i < offset_x + 20; i++) {
-                for (int j = offset_y; j < matchSrc.rows - window.height && j < offset_y + 20; j++) {
-                    int pairNumPre = 0;
+					cv::Mat matchSrcAngleROI = gradientAngle(cv::Rect(i, j, window.width, window.height));
+					if (cv::sum(matchSrcROI)[0] < sumVal[loopVTPNum] * 0.75) {
+						//continue;
+					}
+					int directionIndex = 1;
+					for (int loopRotateNum = localAngle; loopRotateNum < n; loopRotateNum++) {
+						pairNum = 0;
 
-                    cv::Mat matchSrcMagnitudeROI = gradientVal(cv::Rect(i, j, window.width, window.height));
-                    cv::Mat matchSrcROI = matchSrc(cv::Rect(i, j, window.width, window.height));
+						cv::Mat tt; //绘图
+						matchSrc(cv::Rect(i, j, window.width, window.height)).copyTo(tt);
+						for (auto k : class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()].features) {
+							cv::circle(tt, cv::Point(k.x, k.y), 2, cv::Scalar(0), -1, 8, 0);
+						}
+						bool flag = true;
+						int kernel = 2;
+						for (auto k : class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()].features) {
+							flag = false;
+							float agVal = matchSrcMagnitudeROI.at<float>(k.y, k.x);
+							for (int c = 0; c < kernel; c++) {
+								for (int r = 0; r < kernel; r++) {
+									if (k.y + r >= matchSrcMagnitudeROI.rows || k.x + c >= matchSrcMagnitudeROI.cols) {
+										continue;
+									}
+									float agValMax = matchSrcMagnitudeROI.at<float>(k.y + r, k.x + c);
+									int oriVal = matchSrcAngleROI.at<uchar>(k.y + r, k.x + c);
+									int diffOri = abs(getLabel(oriVal) - k.label);
+									if (abs(agValMax - agVal) < 50000 && diffOri < 2 && agVal > 50000) {
+										flag = true;
+									}
+								}
+							}
+							if (flag) {
+								cv::circle(tt, cv::Point(k.x, k.y), 2, cv::Scalar(255, 255, 255), -1, 8, 0);
+								pairNum++;
+							}
+						}
 
-                    cv::Mat matchSrcAngleROI = gradientAngle(cv::Rect(i, j, window.width, window.height));
-                    if (cv::sum(matchSrcROI)[0] < sumVal[loopVTPNum] * 0.75) {
-                        continue;
-                    }
-                    for (int loopRotateNum = localAngle; loopRotateNum < n; loopRotateNum++) {
-                        pairNum = 0;
-
-                        cv::Mat tt;  //绘图
-                        matchSrc(cv::Rect(i, j, window.width, window.height)).copyTo(tt);
-                        for (auto k :
-                             class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()].features) {
-                            cv::circle(tt, cv::Point(k.x, k.y), 2, cv::Scalar(0), -1, 8, 0);
-                        }
-                        bool flag = true;
-                        int kernel = 2;
-                        for (auto k :
-                             class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()].features) {
-                            flag = false;
-                            float agVal = matchSrcMagnitudeROI.at<float>(k.y, k.x);
-                            for (int c = 0; c < kernel; c++) {
-                                for (int r = 0; r < kernel; r++) {
-                                    if (k.y + r >= matchSrcMagnitudeROI.rows || k.x + c >= matchSrcMagnitudeROI.cols) {
-                                        continue;
-                                    }
-                                    float agValMax = matchSrcMagnitudeROI.at<float>(k.y + r, k.x + c);
-                                    int oriVal = matchSrcAngleROI.at<uchar>(k.y + r, k.x + c);
-                                    int diffOri = abs(getLabel(oriVal) - k.label);
-                                    if (abs(agValMax - agVal) < gradientThreshold && diffOri < 2 &&
-                                        agVal > gradientThreshold) {
-                                        flag = true;
-                                    }
-                                }
-                            }
-                            if (flag) {
-                                pairNum++;
-                            }
-                        }
-
-                        if (static_cast<float>(pairNum) /
-                                class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()]
-                                    .features.size() >
-                            similarity) {
-                            similarity = static_cast<float>(pairNum) /
-                                         class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()]
-                                             .features.size();
-                            i_temp = i;
-                            j_temp = j;
-                            tAngle = loopRotateNum % class_templates[loopVTPNum].size();
-                        }
-                        pairNumPre = pairNum;
-                    }
-                }
-            }
-            offset_x = i_temp;
-            offset_y = j_temp;
-            localAngle = tAngle;
-        }
-        std::vector<cv::Point2f> vPoints;
+						if (static_cast<float>(pairNum) / class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()].features.size() > similarity) {
+							similarity = static_cast<float>(pairNum) / class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()].features.size();
+							i_temp = i;
+							j_temp = j;
+							tAngle = loopRotateNum % class_templates[loopVTPNum].size();
+						}
+						pairNumPre = pairNum;
+					}
+				}
+			}
+			offset_x = i_temp;
+			offset_y = j_temp;
+			localAngle = tAngle;
+		}
+		
+		 std::vector<cv::Point2f> vPoints;
         for (auto k : class_templates[loopVTPNum][localAngle].features) {
             cv::circle(matchSrc, cv::Point(k.x + offset_x, k.y + offset_y), 3, cv::Scalar(255, 255, 255), -1, 8, 0);
             vPoints.emplace_back(cv::Point2f(k.x + offset_x, k.y + offset_y));
         }
+		cv::RotatedRect box;
+		cv::Point2f rect_point[4];
 
-        cv::RotatedRect box;
-        cv::Point2f rect_point[4];
+		box = cv::minAreaRect(vPoints);
+		box.points(rect_point);
 
-        box = cv::minAreaRect(vPoints);
-        box.points(rect_point);
-        for (int j = 0; j < 4; j++) {
-            line(matchSrc, rect_point[j], rect_point[(j + 1) % 4], cv::Scalar(255), 3, 8);  //绘制最小外接矩形每条边
-        }
-
-        cv::imwrite("D:/SmartMore/Function/改进LineMod/templateMatching/templateMatching/res/src" +
-                        std::to_string(nameNumb) + std::to_string(loopVTPNum) + ".png",
-                    matchSrc);
-    }
-    endTime = clock();  //计时结束
-    std::cout << "The run time is: " << (double)(endTime - startTime) / CLOCKS_PER_SEC << "s" << std::endl;
-    if (similarity < 0.2) {
-        return false;
-    }
-    return true;
+		for (int j = 0; j < 4; j++) {
+			//line(matchSrc, rect_point[j], rect_point[(j + 1) % 4], cv::Scalar(255), 3, 8);  //绘制最小外接矩形每条边
+		}
+		cv::imwrite("E:/SmartMore/WorkSpace/LineModAcc/linemodacc/linemodacc/res/src" + std::to_string(nameNumb) + std::to_string(loopVTPNum) + ".png",
+			matchSrc);
+	}
+	endTime = clock(); //计时结束
+	std::cout << "The run time is: " << (double)(endTime - startTime) / CLOCKS_PER_SEC << "s" << std::endl;
+	if (similarity < 0.2) {
+		return false;
+	}
+	return true;
 }
+
+
 
 bool Detector::save(std::string& dir) {
     std::ofstream fout(dir + "/config.yaml");
