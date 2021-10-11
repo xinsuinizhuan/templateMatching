@@ -1,6 +1,6 @@
 #include "templMatching.h"
 
-//À©É¢Á¿»¯
+//æ‰©æ•£é‡åŒ–
 static inline int getLabel(int quantized) {
     switch (quantized) {
         case 0:
@@ -27,7 +27,7 @@ static inline int getLabel(int quantized) {
     }
 }
 
-//É¸Ñ¡ÌØÕ÷µã
+//ç­›é€‰ç‰¹å¾ç‚¹
 bool ColorGradientPyramid::selectScatteredFeatures(const std::vector<Candidate>& candidates,
                                                    std::vector<Feature>& features, size_t num_features,
                                                    float distance) {
@@ -76,7 +76,7 @@ bool ColorGradientPyramid::selectScatteredFeatures(const std::vector<Candidate>&
     return true;
 }
 
-//Ìİ¶ÈÁ¿»¯
+//æ¢¯åº¦é‡åŒ–
 void hysteresisGradient(cv::Mat& magnitude, cv::Mat& quantized_angle, cv::Mat& angle, float threshold) {
     cv::Mat_<unsigned char> quantized_unfiltered;
     angle.convertTo(quantized_unfiltered, CV_8U, 16.0 / 360.0);
@@ -134,7 +134,7 @@ void hysteresisGradient(cv::Mat& magnitude, cv::Mat& quantized_angle, cv::Mat& a
     }
 }
 
-//Ìİ¶È¼ÆËã
+//æ¢¯åº¦è®¡ç®—
 static void quantizedOrientations(const cv::Mat& src, cv::Mat& magnitude, cv::Mat& angle, cv::Mat& angle_ori,
                                   float threshold) {
     cv::Mat smoothed = src;
@@ -323,9 +323,7 @@ bool ColorGradientPyramid::extractTemplate(Template& templ, cv::Mat draw) const 
         }
     }
 	for (int cnt = 0; cnt < 8; cnt++) {
-		if (vCandidate[cnt].size() <= 2) {
-			std::cout << "too few features, abort" << std::endl;
-		}
+		
 		std::stable_sort(vCandidate[cnt].begin(), vCandidate[cnt].end());
 
 		float distance = static_cast<float>(vCandidate[cnt].size() / (num_features/8));
@@ -456,7 +454,7 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 				n = n - class_templates[loopVTPNum].size();
 			}*/
 		}
-		//¶Ô´ı²âÍ¼Ïñ½øĞĞ½ğ×ÖËş½µ²ÉÑù
+		//å¯¹å¾…æµ‹å›¾åƒè¿›è¡Œé‡‘å­—å¡”é™é‡‡æ ·
 		cv::Size window = srcSize;
 		for (int j = 0; j < T_at_level[loopVTPNum]; j += 2) {
 			cv::pyrDown(matchSrc, matchSrc);
@@ -464,14 +462,14 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 			window.height /= 2;
 		}
 		int pairNum = 0;
-		//¼ÆËãÈ«Í¼µÄÌİ¶È·½Ïò
+		//è®¡ç®—å…¨å›¾çš„æ¢¯åº¦æ–¹å‘
 		cv::Mat gradientVal, gradientAngle, gradientAngle_roi;
 		quantizedOrientations(matchSrc, gradientVal, gradientAngle, gradientAngle_roi, 70);
 
 		if (loopVTPNum == class_templates.size() - 1) {
 
-			//Ö»ÔÚµ×²ã½øĞĞ²Ù×÷
-			//¶Ô´ı²âÍ¼ÏñµÄÈ«Í¼·½Ïò½øĞĞ·ÖÀà
+			//åªåœ¨åº•å±‚è¿›è¡Œæ“ä½œ
+			//å¯¹å¾…æµ‹å›¾åƒçš„å…¨å›¾æ–¹å‘è¿›è¡Œåˆ†ç±»
 			std::vector<std::vector<cv::Point2f>> matchSrcAnglePoint(8);
 			for (int i = 0; i < gradientAngle.cols - 1; i++) {
 				for (int j = 0; j < gradientAngle.rows - 1; j++) {
@@ -482,7 +480,7 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 					}
 				}
 			}
-			//°´ÕÕ×ø±ê½øĞĞÅÅĞò
+			//æŒ‰ç…§åæ ‡è¿›è¡Œæ’åº
 			for (int k = 0; k < matchSrcAnglePoint.size(); k++) {
 				sort(matchSrcAnglePoint[k].begin(), matchSrcAnglePoint[k].end(), [](cv::Point2f& a, cv::Point2f& b) {
 					if (a.x < b.x) {
@@ -496,10 +494,10 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 			}
 			float x_t=0, y_t=0, angle_t=0;
 
-			//½Ç¶ÈÆ¥Åä
+			//è§’åº¦åŒ¹é…
 
 			for (int loopRotateNum = 0; loopRotateNum < n; loopRotateNum++) {
-				//¶Ôµ±Ç°½Ç¶ÈµÄÌØÕ÷µã½øĞĞ·½Ïò·ÖÀà
+				//å¯¹å½“å‰è§’åº¦çš„ç‰¹å¾ç‚¹è¿›è¡Œæ–¹å‘åˆ†ç±»
 				std::vector<std::vector<cv::Point2f>> templAnglePoint(8);
 				std::vector<int> maxSize(8);
 				for (auto k : class_templates[loopVTPNum][loopRotateNum].features) {
@@ -508,9 +506,9 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 					}
 					maxSize[k.label - 1]++;
 				}
-				//ÕÒµ½ÔªËØ×î¶àµÄÒ»¸ö·½Ïò
+				//æ‰¾åˆ°å…ƒç´ æœ€å¤šçš„ä¸€ä¸ªæ–¹å‘
 				int maxPosition1 = max_element(maxSize.begin(), maxSize.end()) - maxSize.begin();
-				//Í¬ÑùÅÅĞò
+				//åŒæ ·æ’åº
 				for (int k = 0; k < templAnglePoint.size(); k++) {
 					sort(templAnglePoint[k].begin(), templAnglePoint[k].end(), [](cv::Point2f& a, cv::Point2f& b) {
 						if (a.x < b.x) {
@@ -523,7 +521,7 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 					});
 				}
 
-				//ÉèÖÃãĞÖµ
+				//è®¾ç½®é˜ˆå€¼
 				int gradientThreshold;
 				for (int maxPosition = 0; maxPosition < 8; maxPosition++) {
 					if (templAnglePoint[maxPosition].size() == 0) {
@@ -531,20 +529,20 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 					}
 					float offsetX;
 					float offsetY;
-					//ÉèÖÃ±ß½çÖµ
+					//è®¾ç½®è¾¹ç•Œå€¼
 					int index = 500;
-					//ÉèÖÃkernel
+					//è®¾ç½®kernel
 					int kernel = 5;
-					//ÉèÖÃÆ¥ÅäµÄµãÊı
+					//è®¾ç½®åŒ¹é…çš„ç‚¹æ•°
 					int matchPairNum = 0;
 					bool flag = false;
-					//ÏÈÕÒµ½µÚÒ»¸öÆ¥Åäµã
+					//å…ˆæ‰¾åˆ°ç¬¬ä¸€ä¸ªåŒ¹é…ç‚¹
 					for (int loopMatchSrcPoint = 0; loopMatchSrcPoint < matchSrcAnglePoint[maxPosition].size() && (!flag); loopMatchSrcPoint++) {
 						offsetX = matchSrcAnglePoint[maxPosition][loopMatchSrcPoint].x - templAnglePoint[maxPosition][0].x;
 						offsetY = matchSrcAnglePoint[maxPosition][loopMatchSrcPoint].y - templAnglePoint[maxPosition][0].y;
 						flag = true;
 
-						//ÅĞ¶Ï¸ÃoffsetÊÇ·ñÔÚÇ°4¸öÄÚÓĞĞ§
+						//åˆ¤æ–­è¯¥offsetæ˜¯å¦åœ¨å‰4ä¸ªå†…æœ‰æ•ˆ
 						for (int count = 1; count < templAnglePoint[maxPosition].size() - 1 && count < index; count++) {
 							flag = isExitPoint(cv::Point2f(templAnglePoint[maxPosition][count].x + offsetX,
 								templAnglePoint[maxPosition][count].y + offsetY),
@@ -555,7 +553,7 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 						}
 					}
 
-					//ÀûÓÃoffset½øĞĞÆ¥Åä
+					//åˆ©ç”¨offsetè¿›è¡ŒåŒ¹é…
 					for (int loopRoi = 0; loopRoi < templAnglePoint.size() && flag; loopRoi++) {
 						for (auto k : templAnglePoint[loopRoi]) {
 							if (isExitPoint(cv::Point2f(k.x + offsetX, k.y + offsetY), matchSrcAnglePoint[loopRoi], kernel)) {
@@ -585,7 +583,7 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 			int tAngle = 0;
 			offset_x = (offset_x * 2 - 10) > 0 ? (offset_x * 2 - 10) : (offset_x * 2);
 			offset_y = (offset_y * 2 - 10) > 0 ? (offset_y * 2 - 10) : (offset_y * 2);
-			//Í³¼Æ¸ÃÄ£°åÏÂµÄ·½Ïò×ÜºÍ
+			//ç»Ÿè®¡è¯¥æ¨¡æ¿ä¸‹çš„æ–¹å‘æ€»å’Œ
 			for (int i = offset_x; i < matchSrc.cols - window.width && i < offset_x + 20; i++) {
 				for (int j = offset_y; j < matchSrc.rows - window.height && j < offset_y + 20; j++) {
 					int pairNumPre = 0;
@@ -603,7 +601,7 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 					for (int loopRotateNum = localAngle; loopRotateNum < n; loopRotateNum++) {
 						pairNum = 0;
 
-						cv::Mat tt; //»æÍ¼
+						cv::Mat tt; //ç»˜å›¾
 						matchSrc(cv::Rect(i, j, window.width, window.height)).copyTo(tt);
 						for (auto k : class_templates[loopVTPNum][loopRotateNum % class_templates[loopVTPNum].size()].features) {
 							cv::circle(tt, cv::Point(k.x, k.y), 2, cv::Scalar(0), -1, 8, 0);
@@ -659,12 +657,12 @@ bool Detector::matchTemplate(const cv::Mat& source, int nameNumb)
 		box.points(rect_point);
 
 		for (int j = 0; j < 4; j++) {
-			//line(matchSrc, rect_point[j], rect_point[(j + 1) % 4], cv::Scalar(255), 3, 8);  //»æÖÆ×îĞ¡Íâ½Ó¾ØĞÎÃ¿Ìõ±ß
+			//line(matchSrc, rect_point[j], rect_point[(j + 1) % 4], cv::Scalar(255), 3, 8);  //ç»˜åˆ¶æœ€å°å¤–æ¥çŸ©å½¢æ¯æ¡è¾¹
 		}
 		cv::imwrite("E:/SmartMore/WorkSpace/LineModAcc/linemodacc/linemodacc/res/src" + std::to_string(nameNumb) + std::to_string(loopVTPNum) + ".png",
 			matchSrc);
 	}
-	endTime = clock(); //¼ÆÊ±½áÊø
+	endTime = clock(); //è®¡æ—¶ç»“æŸ
 	std::cout << "The run time is: " << (double)(endTime - startTime) / CLOCKS_PER_SEC << "s" << std::endl;
 	if (similarity < 0.2) {
 		return false;
